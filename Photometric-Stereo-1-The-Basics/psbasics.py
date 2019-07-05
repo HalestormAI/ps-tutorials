@@ -25,9 +25,13 @@ def sanitise_image(image):
     return (image / 255).flatten()
 
 
-def ps_3_source(images, L):
-    """Images should be a 3 element list of single-channel greyscale images.
-    L is a 3x3 numpy array containing the light direction vectors, with each row being one light vector"""
+def ps_basic_ols(images, L):
+    """
+    A simple implementation of Photometric Stereo using Ordinary Least Squares. This is compatible with
+    3 or more light sources, provided the number of images matches the number of lights.
+
+    Images should be an `n` element list of single-channel greyscale images.
+    L is a 3xn numpy array of column vectors for the light direction vectors"""
 
     # We'll need this later...
     original_size = images[0].shape[:2]
@@ -38,11 +42,14 @@ def ps_3_source(images, L):
     # Make sure that lighting vectors are normalised
     L = L / np.linalg.norm(L, ord=2, axis=1, keepdims=True)
 
-    # Solve for G = N'*rho using Normal equations
-    norm_sln = np.linalg.inv(L.T * L) * L.T
+    # Solve for G = N'*rho using ordinary least squares
+    # (L^T L) \ L^T
+    norm_sln = np.linalg.pinv(L.T.dot(L)).dot(L.T)
 
-    # We can do this easily for each pixel. norm_sln is 3x3, images is 3xn (where n i num pixels)
-    G = np.matmul(norm_sln, images)
+    # For a single pixel (3x1 column) we can trivially calculate G: norm_sum * px
+    # norm_sln is 3x3, images is 3xn (where n i num pixels)
+    # It's slow to iterate this, but the einsum method lets us broadcast the multiplication over the array
+    G = np.einsum("ij,il", norm_sln, images)
 
     # The albedo is just the column-wise L2 norm (magnitude) of G...
     rho = np.linalg.norm(G, axis=0)
@@ -61,21 +68,30 @@ def ps_3_source(images, L):
 
 if __name__ == "__main__":
     if len(sys.argv) < 5:
-        print("USAGE: psbasics <lights_filename> <image_1_filename> <image_3_filename> <image_3_filename>")
+        print("USAGE: psbasics <lights_filename> <image_1_filename> <image_2_filename> <image_3_filename> ...")
         sys.exit()
 
-    L = np.loadtxt(sys.argv[1])
+    # We take the transpose here because the lighting vectors should be columns and we read as rows.
+    L = np.loadtxt(sys.argv[1]).T
+
+    # Sanity check the inputs one last time before we get going.
+    if len(sys.argv) - 2 != L.shape[1]:
+        raise ValueError('Error: The number of light vectors does not match the number of input images.')
 
     # Create a list from the input images
     images = []
-    for i in range(3):
-        images.append(misc.imread(sys.argv[i + 2]))
+    for i in range(L.shape[1]):
+        # Important: Note that we flatten the images to greyscale here
+        images.append(misc.imread(sys.argv[i + 2], flatten=True))
 
     # Run the PS algorithm
-    N, rho = ps_3_source(images, L)
+    N, rho = ps_basic_ols(images, L)
+
+    # Values in N range from -1...1, we need them in 0...1, so we'll quickly remap it
+    N_display = (N + 1) / 2
 
     plt.subplot('121')
-    plt.imshow(N)
+    plt.imshow(N_display)
     plt.subplot('122')
     plt.imshow(255 * rho, cmap='gray')
     plt.show()
