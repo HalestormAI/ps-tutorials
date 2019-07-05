@@ -8,6 +8,6 @@ Install the dependencies using the requirements file in the parent directory, as
 
 You can then run this example by simply calling:
 
-```python
+```bash
     $ python3 psbasics.py
 ```
